@@ -184,6 +184,22 @@ def _txn_fingerprint(account_uid: str, raw: dict) -> str:
     return digest[:32]
 
 
+def _canonical_amount(amount_obj: Any) -> str:
+    """Canonical string for an EB amount.
+    e.g. "12.0" is the same as "12.00"
+    So we need to prase it as decimal to get the same result/externa ids
+    """
+    if not isinstance(amount_obj, dict):
+        return ""
+    raw = amount_obj.get("amount")
+    if raw is None or raw == "":
+        return ""
+    try:
+        return format(Decimal(str(raw)).normalize(), "f")
+    except InvalidOperation:
+        return str(raw)
+
+
 def _entry_reference_external_id(entry_ref: str, amount_obj: dict, raw: dict) -> str:
     """Disambiguate a non-empty ``entry_reference`` with amount + date.
 
@@ -197,7 +213,7 @@ def _entry_reference_external_id(entry_ref: str, amount_obj: dict, raw: dict) ->
     """
     parts = [
         entry_ref,
-        str(amount_obj.get("amount") or "") if isinstance(amount_obj, dict) else "",
+        _canonical_amount(amount_obj),
         str(amount_obj.get("currency") or "") if isinstance(amount_obj, dict) else "",
         str(raw.get("booking_date") or ""),
         str(raw.get("value_date") or ""),

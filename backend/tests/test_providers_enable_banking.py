@@ -825,6 +825,22 @@ def test_entry_reference_external_id_differs_on_amount_or_date():
     assert baseline != other_date
 
 
+def test_entry_reference_external_id_stable_across_equivalent_amount_spellings():
+    """"12.00" and "12.0" are the same Decimal amount.
+    If we get 12.00 or 12.0 or 12 we need to calculate the same external id"""
+    base_raw = {"booking_date": "2026-08-31", "value_date": "2026-08-31"}
+    a = _entry_reference_external_id(
+        "ref-x", {"amount": "12.00", "currency": "EUR"}, base_raw
+    )
+    b = _entry_reference_external_id(
+        "ref-x", {"amount": "12.0", "currency": "EUR"}, base_raw
+    )
+    c = _entry_reference_external_id(
+        "ref-x", {"amount": "12", "currency": "EUR"}, base_raw
+    )
+    assert a == b == c
+
+
 def test_txn_fingerprint_includes_transaction_date():
     raw1 = {
         "transaction_amount": {"amount": "20.00", "currency": "EUR"},
