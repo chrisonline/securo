@@ -41,7 +41,7 @@ def upgrade() -> None:
             WHERE bc.provider = 'enable_banking'
               AND t.source = 'sync'
               AND t.raw_data IS NOT NULL
-              AND t.external_id = btrim(t.raw_data ->> 'entry_reference', E' \\t\\n\\r')
+              AND t.external_id = btrim(t.raw_data ->> 'entry_reference', E' \\t\\n\\r\\v')
             """
         )
     ).fetchall()
