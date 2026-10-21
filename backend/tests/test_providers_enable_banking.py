@@ -857,3 +857,30 @@ def test_txn_fingerprint_includes_transaction_date():
     assert fp1 != fp2
 
 
+
+
+def test_entry_reference_external_id_differs_on_other_transaction_details():
+    """A shared entry_reference with equal amount, currency and dates must
+    still separate a charge from its refund and settlement lines for
+    different counterparties."""
+    amount = {"amount": "10.00", "currency": "EUR"}
+    base_raw = {
+        "booking_date": "2026-08-31",
+        "value_date": "2026-08-31",
+        "credit_debit_indicator": "DBIT",
+        "remittance_information": ["Card purchase"],
+        "creditor": {"name": "Shop A"},
+    }
+    baseline = _entry_reference_external_id("ref-x", amount, base_raw)
+
+    refund = _entry_reference_external_id(
+        "ref-x", amount, {**base_raw, "credit_debit_indicator": "CRDT"}
+    )
+    other_remittance = _entry_reference_external_id(
+        "ref-x", amount, {**base_raw, "remittance_information": ["Card purchase 2"]}
+    )
+    other_creditor = _entry_reference_external_id(
+        "ref-x", amount, {**base_raw, "creditor": {"name": "Shop B"}}
+    )
+    assert len({baseline, refund, other_remittance, other_creditor}) == 4
+    assert baseline == _entry_reference_external_id("ref-x", amount, dict(base_raw))
