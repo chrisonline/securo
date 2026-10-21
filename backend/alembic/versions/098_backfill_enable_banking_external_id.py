@@ -10,12 +10,12 @@ Only touches transactions whose entry_reference-based branch actually
 changed: rows whose fallback fingerprint (empty/"0" entry_reference) was
 used are unaffected by the fix and are skipped here too.
 
-Idempotent: only matches rows whose external_id still equals the raw,
-stripped entry_reference from their own raw_data (i.e. provably still on
-the old scheme). Safe to re-run.
+Idempotent: recomputes the id from each row's own raw_data and only
+updates rows whose external_id differs (raw-reference rows as well as rows
+keyed by an earlier revision of the disambiguation hash). Safe to re-run.
 
-Revision ID: 097
-Revises: 096
+Revision ID: 098
+Revises: 097
 Create Date: 2026-10-01
 """
 from alembic import op
@@ -23,8 +23,8 @@ from sqlalchemy import text
 
 from app.providers.enable_banking import _entry_reference_external_id
 
-revision = "097"
-down_revision = "096"
+revision = "098"
+down_revision = "097"
 branch_labels = None
 depends_on = None
 
@@ -34,14 +34,14 @@ def upgrade() -> None:
     rows = bind.execute(
         text(
             """
-            SELECT t.id, t.raw_data
+            SELECT t.id, t.external_id, t.raw_data
             FROM transactions t
             JOIN accounts a ON a.id = t.account_id
             JOIN bank_connections bc ON bc.id = a.connection_id
             WHERE bc.provider = 'enable_banking'
               AND t.source = 'sync'
               AND t.raw_data IS NOT NULL
-              AND t.external_id = btrim(t.raw_data ->> 'entry_reference', E' \\t\\n\\r\\v')
+              AND btrim(t.raw_data ->> 'entry_reference', E' \\t\\n\\r\\v') NOT IN ('', '0')
             """
         )
     ).fetchall()
@@ -55,6 +55,8 @@ def upgrade() -> None:
             continue
         amount_obj = raw_data.get("transaction_amount") or {}
         new_external_id = _entry_reference_external_id(entry_ref, amount_obj, raw_data)
+        if new_external_id == row.external_id:
+            continue
         bind.execute(
             text("UPDATE transactions SET external_id = :new_id WHERE id = :id"),
             {"new_id": new_external_id, "id": row.id},
