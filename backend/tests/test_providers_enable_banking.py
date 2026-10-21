@@ -365,7 +365,7 @@ async def test_get_transactions_parses_nested_and_flat_shapes(eb_keys):
     assert debit.external_id == _entry_reference_external_id(
         "ref-1",
         {"amount": "10.00", "currency": "EUR"},
-        {"booking_date": "2026-05-10"},
+        nested_page["transactions"]["booked"][0],
     )
     credit = next(t for t in nested if t.type == "credit")
     assert credit.status == "pending"
@@ -438,7 +438,7 @@ async def test_get_transactions_stops_on_repeated_continuation_key(eb_keys, capl
     expected_id = _entry_reference_external_id(
         "looped-tx-1",
         {"amount": "10.00", "currency": "EUR"},
-        {"booking_date": "2026-05-10"},
+        page["transactions"][0],
     )
     assert [transaction.external_id for transaction in transactions] == [expected_id]
     assert "pagination loop detected" in caplog.text
@@ -511,7 +511,7 @@ async def test_get_transactions_retries_shorter_window_on_wrong_period(eb_keys):
     expected_id = _entry_reference_external_id(
         "tx-1",
         {"amount": "5.00", "currency": "EUR"},
-        {"booking_date": date.today().isoformat()},
+        {"booking_date": date.today().isoformat(), "credit_debit_indicator": "DBIT"},
     )
     assert [t.external_id for t in transactions] == [expected_id]
 
