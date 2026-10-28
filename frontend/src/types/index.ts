@@ -178,9 +178,20 @@ export interface Account {
   institution_name: string | null
   institution_logo_url: string | null
   type: string
+  secured_asset_id?: string | null
+  // Loan accounts only: contract terms the payment schedule is computed from.
+  loan_kind?: LoanKind | null
+  loan_original_amount?: number | null
+  loan_interest_rate?: number | null
+  loan_rate_period?: LoanRatePeriod | null
+  loan_term_months?: number | null
+  loan_first_payment_date?: string | null
+  loan_amortization?: LoanAmortization | null
   balance: number
   current_balance: number
   previous_balance: number | null
+  // Date of the opening-balance transaction; null when there is none.
+  balance_date?: string | null
   balance_primary: number | null
   // No real FX rate: balance_primary is unset and totals use the native amount.
   fx_fallback?: boolean
@@ -195,6 +206,12 @@ export interface Account {
   card_brand: string | null
   card_level: string | null
   shared_balance_group: string | null
+  // Open bill (due today or later) of a card on a shared credit line, in the
+  // account's currency. Null when the card has no such bill; the row then
+  // keeps showing the balance.
+  open_bill_total?: number | null
+  // Same bill in the user's primary currency; null when not converted.
+  open_bill_total_primary?: number | null
   is_closed: boolean
   closed_at: string | null
 }
@@ -281,6 +298,12 @@ export interface Transaction {
   payee_name: string | null
   notes: string | null
   transfer_pair_id: string | null
+  /**
+   * The other leg of the transfer this row belongs to, when it is one.
+   * The paginated list fills it so the badge can name the account the
+   * transfer is linked to (issue #810); other endpoints leave it null.
+   */
+  transfer_counterpart?: { account_id: string; account_name: string } | null
   amount_primary: number | null
   fx_rate_used: number | null
   fx_fallback: boolean
@@ -442,6 +465,28 @@ export interface GroupBalances {
   self_member_id: string | null
   default_currency: string
   lines: GroupBalanceLine[]
+}
+
+export interface GroupSummaryMonth {
+  /** "YYYY-MM" — the client formats it for display. */
+  month: string
+  total: number
+}
+
+export interface GroupSummaryCategory {
+  /** Null for transactions with no category. */
+  category_id: string | null
+  name: string | null
+  color: string | null
+  total: number
+}
+
+export interface GroupSummary {
+  group_id: string
+  default_currency: string
+  total_moved: number
+  months: GroupSummaryMonth[]
+  categories: GroupSummaryCategory[]
 }
 
 /** A fiscal document belonging to a payee. `kind` mirrors the backend's
@@ -659,6 +704,7 @@ export interface ProjectedTransaction {
   category_name: string | null
   category_icon: string | null
   category_color: string | null
+  category_treat_as_transfer: boolean
 }
 
 export interface TransactionCalendarItem {
@@ -734,6 +780,9 @@ export interface DashboardSummary {
   assets_value: Record<string, number>
   assets_value_primary: number
   primary_currency: string
+  // At least one currency bucket had no real FX rate, so the *_primary
+  // totals sum it at 1:1 and are an estimate, not a conversion (issue #1165).
+  fx_fallback?: boolean
   // Net pending balance from group splits in primary currency.
   // Negative = net liability, positive = net receivable. Already
   // accounts for partial settlements.
@@ -761,6 +810,13 @@ export interface DailyBalance {
   balance: number | null
 }
 
+export interface DailyBaseline {
+  day: number
+  median: number | null
+  lower_quartile: number | null
+  upper_quartile: number | null
+}
+
 /** End-of-day balance of one account, one point per day (#1202). */
 export interface AccountRunningBalancePoint {
   date: string
@@ -770,7 +826,11 @@ export interface AccountRunningBalancePoint {
 
 export interface BalanceHistory {
   current: DailyBalance[]
-  previous: DailyBalance[]
+  opening_balance: number
+  baseline: DailyBaseline[]
+  comparison: DailyBalance[] | null
+  comparison_month: string | null
+  comparison_opening_balance: number | null
 }
 
 export interface Budget {
@@ -796,6 +856,26 @@ export interface BudgetVsActual {
   projected_prev_month_amount: number
   percentage_used: number | null
   is_recurring: boolean
+}
+
+export interface BudgetSuggestion {
+  category_id: string
+  category_name: string
+  category_icon: string
+  category_color: string
+  group_id: string | null
+  group_name: string | null
+  suggested_amount: string
+  total_spent: string
+  months_with_data: number
+  existing_budget: boolean
+}
+
+export interface BudgetSuggestionResponse {
+  month: string
+  months_requested: number
+  months_analyzed: number
+  suggestions: BudgetSuggestion[]
 }
 
 export interface Asset {
@@ -1801,4 +1881,53 @@ export interface ReconciliationHistoryEvent {
   user_id?: string | null
   transaction_id?: string | null
   transaction_description?: string | null
+}
+
+export type LoanKind = 'mortgage' | 'auto' | 'personal' | 'student' | 'other'
+export type LoanRatePeriod = 'monthly' | 'yearly_effective' | 'yearly_nominal'
+export type LoanAmortization = 'price' | 'sac'
+
+export interface LoanInstallment {
+  number: number
+  due_date: string
+  payment: number
+  interest: number
+  principal: number
+  balance: number
+}
+
+/** The lender's balance on a date, sent to bring a loan's ledger in line. */
+export interface LoanBalanceUpdate {
+  balance: number
+  date: string
+  description: string
+  category_id?: string | null
+}
+
+/** What the backend recorded: positive when the debt grew, 0 when it already matched. */
+export interface LoanBalanceAdjustment {
+  adjustment: number
+  current_debt: number
+  transaction_id: string | null
+}
+
+/** A loan's payment schedule, computed by the backend from its contract terms. */
+export interface LoanSchedule {
+  account_id: string
+  currency: string
+  current_debt: number
+  configured: boolean
+  missing: string[]
+  monthly_payment: number | null
+  payments_due: number | null
+  remaining_payments: number | null
+  next_payment: LoanInstallment | null
+  scheduled_balance: number | null
+  ahead_by: number | null
+  total_interest: number | null
+  total_paid: number | null
+  payoff_date: string | null
+  projected_payoff_date: string | null
+  paid_off: boolean
+  installments: LoanInstallment[]
 }

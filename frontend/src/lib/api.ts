@@ -21,6 +21,9 @@ import type {
   AccountRunningBalancePoint,
   Collection,
   CreditCardBill,
+  LoanBalanceAdjustment,
+  LoanBalanceUpdate,
+  LoanSchedule,
   DescriptionSuggestion,
   Transaction,
   Payee,
@@ -53,6 +56,7 @@ import type {
   TransactionCalendarResponse,
   Budget,
   BudgetVsActual,
+  BudgetSuggestionResponse,
   Rule,
   RuleAction,
   RuleConditionNode,
@@ -91,6 +95,7 @@ import type {
   GroupMember,
   GroupSettlement,
   GroupBalances,
+  GroupSummary,
   TransactionSplitsInput,
   TransactionEditPayload,
   InstallmentSeriesInput,
@@ -496,6 +501,7 @@ export const accounts = {
     balance?: number
     balance_date?: string
     currency?: string
+    secured_asset_id?: string | null
     credit_limit?: number | null
     statement_close_day?: number | null
     payment_due_day?: number | null
@@ -520,6 +526,14 @@ export const accounts = {
   },
   runningBalance: async (id: string, from?: string, to?: string): Promise<AccountRunningBalancePoint[]> => {
     const { data } = await api.get(`/accounts/${id}/running-balance`, { params: { from, to } })
+    return data
+  },
+  loanSchedule: async (id: string): Promise<LoanSchedule> => {
+    const { data } = await api.get(`/accounts/${id}/loan-schedule`)
+    return data
+  },
+  adjustLoanBalance: async (id: string, body: LoanBalanceUpdate): Promise<LoanBalanceAdjustment> => {
+    const { data } = await api.post(`/accounts/${id}/loan-balance`, body)
     return data
   },
   bills: async (id: string, limit = 24): Promise<CreditCardBill[]> => {
@@ -618,6 +632,10 @@ export const transactions = {
   },
   unlinkRecurring: async (id: string): Promise<Transaction> => {
     const { data } = await api.patch(`/transactions/${id}/unlink-recurring`)
+    return data
+  },
+  postToday: async (id: string): Promise<Transaction> => {
+    const { data } = await api.post(`/transactions/${id}/post-today`)
     return data
   },
   createTransfer: async (transfer: {
@@ -1024,6 +1042,10 @@ export const groups = {
     const { data } = await api.get(`/groups/${groupId}/balances`)
     return data
   },
+  summary: async (groupId: string): Promise<GroupSummary> => {
+    const { data } = await api.get(`/groups/${groupId}/summary`)
+    return data
+  },
   transactions: async (groupId: string, limit = 20): Promise<Transaction[]> => {
     const { data } = await api.get(`/groups/${groupId}/transactions`, {
       params: { limit },
@@ -1283,6 +1305,18 @@ export const budgets = {
     const { data } = await api.get('/budgets/comparison', { params: { month } })
     return data
   },
+  suggestions: async (month: string, months: number): Promise<BudgetSuggestionResponse> => {
+    const { data } = await api.get('/budgets/suggestions', { params: { month, months } })
+    return data
+  },
+  createBatch: async (payload: {
+    month: string
+    is_recurring: boolean
+    items: { category_id: string; amount: number }[]
+  }): Promise<Budget[]> => {
+    const { data } = await api.post('/budgets/batch', payload)
+    return data
+  },
 }
 
 // Goals
@@ -1347,9 +1381,28 @@ export const dashboard = {
     const { data } = await api.get('/dashboard/projected-transactions', { params })
     return data
   },
-  balanceHistory: async (month?: string, accountIds?: string[]): Promise<BalanceHistory> => {
+  balanceHistory: async (
+    month?: string,
+    accountIds?: string[],
+    comparisonMonths?: string[],
+  ): Promise<BalanceHistory> => {
     const extra = acctIdsParam(accountIds)
-    const { data } = await api.get('/dashboard/balance-history', { params: { month, ...(extra.params ?? {}) }, ...(extra.paramsSerializer ? { paramsSerializer: extra.paramsSerializer } : {}) })
+    const { data } = await api.get('/dashboard/balance-history', {
+      params: {
+        month,
+        ...(extra.params ?? {}),
+        ...(comparisonMonths?.length ? { comparison_months: comparisonMonths } : {}),
+      },
+      paramsSerializer: { indexes: null },
+    })
+    return data
+  },
+  balanceHistoryMonths: async (accountIds?: string[]): Promise<string[]> => {
+    const extra = acctIdsParam(accountIds)
+    const { data } = await api.get('/dashboard/balance-history/months', {
+      params: extra.params,
+      ...(extra.paramsSerializer ? { paramsSerializer: extra.paramsSerializer } : {}),
+    })
     return data
   },
 }
@@ -1564,6 +1617,13 @@ export const reports = {
   cashFlow: async (months = 6, interval = 'daily', baseline = false, accountIds?: string[]): Promise<ReportResponse> => {
     const extra = acctIdsParam(accountIds)
     const { data } = await api.get('/reports/cash-flow', { params: { months, interval, baseline, ...(extra.params ?? {}) }, ...(extra.paramsSerializer ? { paramsSerializer: extra.paramsSerializer } : {}) })
+    return data
+  },
+  // Oldest and newest transaction dates in the workspace (opening
+  // balances excluded). The reports page builds its year picker from
+  // these bounds (issue #765).
+  dataRange: async (): Promise<{ min_date: string | null; max_date: string | null }> => {
+    const { data } = await api.get('/reports/data-range')
     return data
   },
 }
@@ -1888,7 +1948,13 @@ export const agents = {
     const { data } = await api.get(`/agents/${id}`)
     return data
   },
-  create: async (payload: Partial<Agent> & { name: string }): Promise<Agent> => {
+  create: async (
+    payload: Partial<Agent> & {
+      name: string
+      /** Tool whitelist saved with the agent in the same transaction. */
+      tools?: { server: string; tool_name: string; enabled: boolean }[]
+    },
+  ): Promise<Agent> => {
     const { data } = await api.post('/agents', payload)
     return data
   },

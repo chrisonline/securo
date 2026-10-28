@@ -10,6 +10,7 @@ import { localDateString } from '@/lib/date-utils'
 import { applyTransactionToBalance, excludeMaterializedProjections, mergeRunningBalances, runningBalanceChartFrom, transactionAmountForBalance } from '@/lib/account-detail-utils'
 import { invalidateFinancialQueries } from '@/lib/invalidate-queries'
 import { shouldShowPendingBadge } from '@/lib/transaction-status'
+import { isTransferTransaction } from '@/lib/transaction-transfer'
 import { closeDateForBill, isOpenCycleWindow } from '@/lib/credit-card-cycle'
 import { toast } from 'sonner'
 import type { CreditCardBill, ProjectedTransaction, Transaction } from '@/types'
@@ -35,6 +36,7 @@ import { useWorkspace } from '@/contexts/workspace-context'
 import { useCreateTransaction } from '@/hooks/use-create-transaction'
 import { resolveDateFnsLocale } from '@/lib/date-fns-locale'
 import { formatCurrency } from '@/lib/format'
+import { LoanScheduleCard } from '@/components/loan-schedule-card'
 import {
   AreaChart,
   Area,
@@ -727,7 +729,7 @@ export default function AccountDetailPage() {
             color: p.category_color ?? '',
             is_system: false,
             is_hidden: false,
-            treat_as_transfer: false,
+            treat_as_transfer: p.category_treat_as_transfer,
             is_ignored: false,
           }
         : null,
@@ -1451,6 +1453,10 @@ export default function AccountDetailPage() {
         )
       })()}
 
+      {account.type === 'loan' && (
+        <LoanScheduleCard accountId={account.id} locale={locale} dateLocale={dateLocale} mask={mask} canWrite={canWrite} />
+      )}
+
       {/* Balance / Cycle spending chart */}
       {(() => {
         const cycleEmpty = isCreditCard && chartData.length > 0 && chartData[chartData.length - 1].balance === 0
@@ -1659,7 +1665,7 @@ export default function AccountDetailPage() {
                 <tbody>
                   {displayRows.map((tx) => {
                     const isOpening = tx.source === 'opening_balance'
-                    const isTransfer = !!tx.transfer_pair_id
+                    const isTransfer = isTransferTransaction(tx)
                     const isIgnored = tx.is_ignored
                     const isVirtual = tx.virtual === true
                     return (
