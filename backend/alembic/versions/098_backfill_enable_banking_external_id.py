@@ -6,9 +6,20 @@ Enable Banking transaction would be re-inserted as a duplicate on its next
 sync. Scoped strictly to Enable Banking connections via bank_connections.provider
 — every other provider's transactions are untouched.
 
+Covers synced rows and locally imported rows that a sync later linked to an
+Enable Banking transaction: the link moves the EB id onto the imported row but
+keeps its import source, and nothing else would re-key it.
+
 Only touches transactions whose entry_reference-based branch actually
 changed: rows whose fallback fingerprint (empty/"0" entry_reference) was
 used are unaffected by the fix and are skipped here too.
+
+Rows whose raw_data no longer describes them (amount, direction or date
+differ) are skipped as well. Under the old scheme a later transaction sharing
+the reference matched the existing row and merged its payload into it, so
+hashing that payload would hand the row the later transaction's id and hide
+that transaction for good. Those rows keep their legacy id; the sync's
+entry_reference re-key claims them when their own transaction comes back.
 
 Idempotent: recomputes the id from each row's own raw_data and only
 updates rows whose external_id differs (raw-reference rows as well as rows
@@ -21,7 +32,7 @@ Create Date: 2026-10-01
 from alembic import op
 from sqlalchemy import text
 
-from app.providers.enable_banking import _entry_reference_external_id
+from app.providers.enable_banking import EnableBankingProvider
 
 revision = "098"
 down_revision = "097"
@@ -34,18 +45,19 @@ def upgrade() -> None:
     rows = bind.execute(
         text(
             """
-            SELECT t.id, t.external_id, t.raw_data
+            SELECT t.id, t.external_id, t.raw_data, t.amount, t.type, t.date
             FROM transactions t
             JOIN accounts a ON a.id = t.account_id
             JOIN bank_connections bc ON bc.id = a.connection_id
             WHERE bc.provider = 'enable_banking'
-              AND t.source = 'sync'
+              AND t.source IN ('sync', 'import', 'csv', 'ofx', 'qif', 'camt')
               AND t.raw_data IS NOT NULL
-              AND btrim(t.raw_data ->> 'entry_reference', E' \\t\\n\\r\\v') NOT IN ('', '0')
+              AND btrim(t.raw_data ->> 'entry_reference', E' \\t\\n\\r\\x0b') NOT IN ('', '0')
             """
         )
     ).fetchall()
 
+    provider = EnableBankingProvider()
     for row in rows:
         raw_data = row.raw_data
         if not isinstance(raw_data, dict):
@@ -53,15 +65,22 @@ def upgrade() -> None:
         entry_ref = (raw_data.get("entry_reference") or "").strip()
         if not entry_ref or entry_ref == "0":
             continue
-        amount_obj = raw_data.get("transaction_amount") or {}
-        new_external_id = _entry_reference_external_id(entry_ref, amount_obj, raw_data)
-        if new_external_id == row.external_id:
+        # The account uid only feeds the fingerprint fallback, which a
+        # non-empty entry_reference never reaches.
+        parsed = provider._build_transaction("", raw_data, "posted", "auto")
+        if parsed is None or (parsed.amount, parsed.type, parsed.date) != (
+            row.amount,
+            row.type,
+            row.date,
+        ):
+            continue
+        if parsed.external_id == row.external_id:
             continue
         bind.execute(
             text("UPDATE transactions SET external_id = :new_id WHERE id = :id"),
-            {"new_id": new_external_id, "id": row.id},
+            {"new_id": parsed.external_id, "id": row.id},
         )
 
 
 def downgrade() -> None:
-   pass
+    pass

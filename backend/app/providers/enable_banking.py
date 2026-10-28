@@ -185,8 +185,9 @@ def _txn_fingerprint(account_uid: str, raw: dict) -> str:
 
 def _canonical_amount(amount_obj: Any) -> str:
     """Canonical string for an EB amount.
-    e.g. "12.0" is the same as "12.00"
-    So we need to prase it as decimal to get the same result/externa ids
+
+    "12", "12.0" and "12.00" are the same amount, so parse it as a Decimal
+    to give every spelling the same external id.
     """
     if not isinstance(amount_obj, dict):
         return ""

@@ -831,15 +831,14 @@ def test_build_transaction_treats_entry_reference_zero_as_missing():
 def test_build_transaction_disambiguates_shared_batch_entry_reference():
     """#753 follow-up: a shared settlement/batch reference must not collide.
 
-    Reported cases:
-    An Austrian bank reuses the same entry_reference for a fee
-    line and its related main charge. Both have valid booking/value dates (so
-    the #756 transaction_date fallback doesn't kick in) — only the amount
-    differs, and that alone must be enough to keep both external_ids apart.
+    An Austrian bank reuses the same entry_reference for a fee line and its
+    related main charge. Both carry a booking and a value date, so the #756
+    fallback for an empty or "0" reference never applies. The fixture
+    mirrors the reported pair: same reference, booking date and remittance
+    text, different amounts and value dates.
 
-    Wise reuses the card-authorization id as entry_reference for every
-    follow-on charge against the same authorization. Two distinct charges
-    sharing that id must still get distinct external_ids.
+    Wise reuses the card-authorization id the same way for every follow-on
+    charge against one authorization, which this pair covers as well.
     """
     provider = EnableBankingProvider()
     fee = {
@@ -864,6 +863,7 @@ def test_build_transaction_disambiguates_shared_batch_entry_reference():
     assert tx_fee.external_id != tx_main.external_id
     assert tx_fee.amount == Decimal("0.55")
     assert tx_main.amount == Decimal("1006.45")
+
 
 def test_build_transaction_entry_reference_external_id_stable_across_refetch():
     """A genuine re-fetch of the same booked transaction (identical payload)
@@ -928,8 +928,6 @@ def test_txn_fingerprint_includes_transaction_date():
     fp1 = _txn_fingerprint("acc-1", raw1)
     fp2 = _txn_fingerprint("acc-1", raw2)
     assert fp1 != fp2
-
-
 
 
 def test_entry_reference_external_id_differs_on_other_transaction_details():
