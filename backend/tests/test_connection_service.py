@@ -1264,7 +1264,7 @@ async def test_sync_connection_enable_banking_reclaims_row_with_merged_payload(
     session: AsyncSession, test_user, test_workspace,
 ):
     """Before the fix, a charge sharing the fee's reference merged its payload
-    into the fee row, and migration 098 leaves that row on its legacy id.
+    into the fee row, and migration 102 leaves that row on its legacy id.
     The next sync re-claims it for the fee and lands the charge."""
     conn, account = await _eb_account(session, test_user.id, test_workspace.id)
     account_id = account.id
@@ -1295,7 +1295,7 @@ async def test_sync_connection_enable_banking_pending_settled_at_other_amount_is
     """Known gap: a pending row that books at a different amount (a tip, a
     fuel pre-authorization) is not re-keyed. A shared reference with a
     different amount is also what two distinct charges look like (#753), so
-    the booked row lands next to the pending one, as for every provider."""
+    the booked row lands next to the pending one."""
     conn, account = await _eb_account(session, test_user.id, test_workspace.id)
     account_id = account.id
     pending = _eb_txn(_eb_payload("auth-2", "50.00"), status="pending")
@@ -1313,6 +1313,33 @@ async def test_sync_connection_enable_banking_pending_settled_at_other_amount_is
     assert [(row.amount, row.status) for row in rows] == [
         (Decimal("48.90"), "posted"),
         (Decimal("50.00"), "pending"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_sync_connection_enable_banking_pending_booked_past_date_window_is_new_row(
+    session: AsyncSession, test_user, test_workspace,
+):
+    """Known gap: a pending row that books more than 3 days away is not
+    re-keyed either. The same reference and amount days apart is also what
+    two equal follow-on charges look like (#753)."""
+    conn, account = await _eb_account(session, test_user.id, test_workspace.id)
+    account_id = account.id
+    pending = _eb_txn(_eb_payload("auth-3", "50.00"), status="pending")
+    held = _eb_row(
+        test_user.id, test_workspace.id, account,
+        pending.external_id, pending.raw_data, "50.00", status="pending",
+    )
+    session.add(held)
+    await session.commit()
+
+    booked = _eb_txn(_eb_payload("auth-3", "50.00", booking_date="2026-09-04"))
+    await _sync_eb(session, conn, test_workspace.id, test_user.id, [booked])
+
+    rows = await _account_rows(session, account_id)
+    assert sorted((row.date, row.status) for row in rows) == [
+        (date(2026, 8, 31), "pending"),
+        (date(2026, 9, 4), "posted"),
     ]
 
 
@@ -5031,14 +5058,27 @@ async def test_sync_normalizes_simplefin_card_balance_to_positive_for_debt(
 
 
 @pytest.mark.asyncio
-async def test_sync_leaves_simplefin_checking_balance_unchanged(
-    session: AsyncSession, test_user, test_workspace,
+@pytest.mark.parametrize("provider", ["simplefin", "pluggy", "enable_banking"])
+@pytest.mark.parametrize("account_type,provider_type,reported,stored", [
+    # No override: a checking account keeps the provider's balance verbatim.
+    ("checking", "checking", "1234.56", "1234.56"),
+    # A loan the bank labels "checking" is debt whichever sign it reports.
+    ("loan", "checking", "-650.00", "650.00"),
+    ("loan", "checking", "650.00", "650.00"),
+    # A loan the bank labels a card, signed either way by the provider.
+    ("loan", "credit_card", "-650.00", "650.00"),
+    ("loan", "credit_card", "25.00", "25.00"),
+])
+async def test_sync_preserves_overridden_type_and_normalizes_debt(
+    session: AsyncSession, test_user, test_workspace, provider, account_type, provider_type, reported, stored,
 ):
-    """A SimpleFIN non-card account (no override) keeps the provider's balance
-    verbatim — the normalization only applies to credit_card."""
+    """An override survives sync, and a loan always stores its debt positive."""
     from app.models.account import Account
+    from app.schemas.account import AccountUpdate
+    from app.services.account_service import get_account_with_balances, update_account
 
     conn = await _make_simplefin_connection(session, test_user.id, "SF Checking")
+    conn.provider = provider
     account = Account(
         id=uuid.uuid4(), user_id=test_user.id, connection_id=conn.id,
         external_id="sf-chk-1", name="SimpleFIN Checking", type="checking",
@@ -5046,13 +5086,16 @@ async def test_sync_leaves_simplefin_checking_balance_unchanged(
     )
     session.add(account)
     await session.commit()
+    await update_account(session, account.id, test_workspace.id, AccountUpdate(type=account_type))
 
     mock_provider = AsyncMock()
     mock_provider.refresh_credentials = AsyncMock(return_value={"token": "t"})
     mock_provider.get_accounts = AsyncMock(return_value=[
         AccountData(
             external_id="sf-chk-1", name="SimpleFIN Checking",
-            type="checking", balance=Decimal("1234.56"), currency="USD",
+            type=provider_type,
+            balance=Decimal(reported),
+            currency="USD",
         ),
     ])
     mock_provider.get_transactions = AsyncMock(return_value=[])
@@ -5065,7 +5108,13 @@ async def test_sync_leaves_simplefin_checking_balance_unchanged(
         await sync_connection(session, conn.id, test_workspace.id, test_user.id)
 
     await session.refresh(account)
-    assert account.balance == Decimal("1234.56")
+    assert account.type == account_type
+    assert account.balance == Decimal(stored)
+    payload = await get_account_with_balances(session, account.id, test_workspace.id)
+    assert payload is not None
+    # A liability reads as negative money, so the stored debt is positive.
+    expected = -float(stored) if account_type == "loan" else float(stored)
+    assert payload["current_balance"] == expected
 
 
 # ---------------------------------------------------------------------------

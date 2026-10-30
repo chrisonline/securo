@@ -1,4 +1,4 @@
-"""Migration 098 on real PostgreSQL: which Enable Banking rows it re-keys."""
+"""Migration 102 on real PostgreSQL: which Enable Banking rows it re-keys."""
 import importlib.util
 import uuid
 from datetime import date, datetime, timezone
@@ -20,7 +20,7 @@ _MIGRATION_PATH = (
     Path(__file__).resolve().parent.parent
     / "alembic"
     / "versions"
-    / "098_backfill_enable_banking_external_id.py"
+    / "102_backfill_enable_banking_external_id.py"
 )
 _SPEC = importlib.util.spec_from_file_location("eb_external_id_migration", _MIGRATION_PATH)
 assert _SPEC is not None and _SPEC.loader is not None

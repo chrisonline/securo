@@ -25,8 +25,8 @@ Idempotent: recomputes the id from each row's own raw_data and only
 updates rows whose external_id differs (raw-reference rows as well as rows
 keyed by an earlier revision of the disambiguation hash). Safe to re-run.
 
-Revision ID: 098
-Revises: 097
+Revision ID: 102
+Revises: 101
 Create Date: 2026-10-01
 """
 from alembic import op
@@ -34,8 +34,8 @@ from sqlalchemy import text
 
 from app.providers.enable_banking import EnableBankingProvider
 
-revision = "098"
-down_revision = "097"
+revision = "102"
+down_revision = "101"
 branch_labels = None
 depends_on = None
 
